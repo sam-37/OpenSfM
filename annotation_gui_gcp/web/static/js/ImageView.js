@@ -1,16 +1,23 @@
 const canvas = document.getElementById("imgCanvas");
 const imageListBox = document.getElementById("imageSelectBox");
 const context = canvas.getContext("2d");
-const Markers = new Array();
+const Measurements = {};
 const image = new Image();
-let imageScale;
+let currentPointID = null;
+let currentImageKey;
+let currentImageScale;
 
 function changeImage(image_key) {
-    image.onload = function () { drawImage() };
+    image.onload = function () {
+        resizeCanvas();
+        displayImage(image_key);
+        drawMeasurements();
+    };
     image.src = 'image/' + image_key;
 }
 
-function drawImage() {
+function displayImage(image_key) {
+    currentImageKey = image_key;
     // Clear Canvas
     context.fillStyle = "#FFF";
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -19,15 +26,13 @@ function drawImage() {
     const w = image.width;
     const h = image.height;
     if (w > h) {
-        imageScale = canvas.width / w;
+        currentImageScale = canvas.width / w;
     }
     else {
-        imageScale = canvas.height / h;
+        currentImageScale = canvas.height / h;
     }
-    context.drawImage(image, 0, 0, w * imageScale, h * imageScale);
+    context.drawImage(image, 0, 0, w * currentImageScale, h * currentImageScale);
 
-    // Draw markers on top
-    drawMarkers();
 }
 
 function onImageSelect() {
@@ -50,8 +55,19 @@ function populateImageList(points) {
         imageListBox.options.add(opt);
     }
 
-    onWindowResize();
+    redrawWindow();
+}
 
+function populateMeasurements(points) {
+    for (let image_id in points) {
+        Measurements[image_id] = {};
+        for (let point_id in points[image_id]) {
+            const norm_point = points[image_id][point_id];
+            const measurement = new Measurement(norm_point[0], norm_point[1], point_id);
+            Measurements[image_id][point_id] = measurement;
+        }
+    }
+    redrawWindow();
 }
 
 function initialize_event_source() {
@@ -62,6 +78,8 @@ function initialize_event_source() {
         const delay = Date.now() - Math.round(data.time * 1000);
         console.log("SSE message delay is", delay, "ms");
         populateImageList(data["points"]);
+        populateMeasurements(data["points"]);
+        currentPointID = data["selected_point"];
     })
 
 }
@@ -71,8 +89,7 @@ function initialize() {
     canvas.addEventListener("mousedown", mouseClicked, false);
     window.addEventListener("resize", onWindowResize);
     imageListBox.addEventListener('change', onImageSelect);
-    resizeCanvas();
-
+    redrawWindow();
 }
 
 function resizeCanvas() {
@@ -80,43 +97,51 @@ function resizeCanvas() {
     context.canvas.height = window.innerHeight - 30;
 }
 
-function onWindowResize() {
+function redrawWindow() {
     // box.size = box.options.length;
     resizeCanvas();
-    drawImage();
+    displayImage(currentImageKey);
+    drawMeasurements();
 }
 
-class markerSprite {
+function onWindowResize() {
+    redrawWindow();
+}
+
+class Marker {
     constructor() {
         this.img = new Image();
         this.img.src = "http://www.clker.com/cliparts/w/O/e/P/x/i/map-marker-hi.png"
-        this.width = 2*12;
-        this.height = 2*20;
+        this.width = 2 * 12;
+        this.height = 2 * 20;
         this.XOffset = this.width / 2;
         this.YOffset = this.height;
     }
 }
-const sprite = new markerSprite();
 
-class Marker {
-    constructor(x, y) {
-        this.Sprite = sprite;
-        this.pixelX = x;
-        this.pixelY = y;
+// Shared sprite for everything
+const sharedMarker = new Marker();
+
+class Measurement {
+    constructor(x, y, id) {
+        this.Sprite = sharedMarker;
+        this.norm_x = x;
+        this.norm_y = y;
+        this.id = id;
     }
 }
 
-function drawOneMarker(marker) {
-    // Draw marker
-    const sprite = marker.Sprite;
-    const x = marker.pixelX * imageScale;
-    const y = marker.pixelY * imageScale;
+function drawOneMeasurement(measurement) {
+    // Draw measurement
+    const sprite = measurement.Sprite;
+    const normalizer = Math.max(image.width, image.height);
+
+    const x = (image.width / 2 + measurement.norm_x * normalizer) * currentImageScale;
+    const y = (image.height / 2 + measurement.norm_y * normalizer) * currentImageScale;
     context.drawImage(sprite.img, x - sprite.XOffset, y - sprite.YOffset, sprite.width, sprite.height);
 
-    // Calculate position text
-    const markerText = marker.pixelX + ", " + marker.pixelY;
-
-    // Draw a simple box so you can see the position
+    context.font = "20px Arial";
+    const markerText = measurement.id;
     const textMeasurements = context.measureText(markerText);
     context.fillStyle = "#666";
     context.globalAlpha = 0.7;
@@ -128,24 +153,46 @@ function drawOneMarker(marker) {
     context.fillText(markerText, x, y);
 }
 
-function drawMarkers() {
-    // Draw markers
-    for (let i = 0; i < Markers.length; i++) {
-        drawOneMarker(Markers[i]);
+function drawMeasurements() {
+    if (!(currentImageKey in Measurements)) { return; }
+
+    // Draw measurements
+    for (const [id, measurement] of Object.entries(Measurements[currentImageKey])) {
+        drawOneMeasurement(measurement);
     }
 };
 
 const mouseClicked = function (mouse) {
+    if (currentPointID === null) {
+        console.log("No point selected, ignoring click")
+        return;
+    }
+
     const rect = canvas.getBoundingClientRect();
 
     // native pixel coordinates
-    const pixelX = (mouse.x - rect.left) / imageScale;
-    const pixelY = (mouse.y - rect.top) / imageScale;
+    const normalizer = Math.max(image.width, image.height);
+    const norm_x = ((mouse.x - rect.left) / currentImageScale - image.width / 2) / normalizer;
+    const norm_y = ((mouse.y - rect.top) / currentImageScale - image.height / 2) / normalizer;
 
-    const marker = new Marker(pixelX, pixelY);
+    const measurement = new Measurement(norm_x, norm_y, currentPointID);
 
-    Markers.push(marker);
-    drawOneMarker(marker);
+    if (!(currentImageKey in Measurements)) {
+        Measurements[currentImageKey] = {};
+    }
+
+    // If the point was already on the image, modify and redraw everything
+    if (!(currentPointID in Measurements[currentImageKey])) {
+
+        // Probably best to replace with a (laggy-but-robust) interaction with the backend ?
+        Measurements[currentImageKey][currentPointID] = measurement;
+        drawOneMeasurement(measurement);
+    }
+    else {
+        Measurements[currentImageKey][currentPointID] = measurement;
+        redrawWindow();
+    }
+
 }
 
 window.addEventListener('load', initialize);
