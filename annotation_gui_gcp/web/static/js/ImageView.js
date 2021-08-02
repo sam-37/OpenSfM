@@ -108,49 +108,34 @@ function onWindowResize() {
     redrawWindow();
 }
 
-class Marker {
-    constructor() {
-        this.img = new Image();
-        this.img.src = "http://www.clker.com/cliparts/w/O/e/P/x/i/map-marker-hi.png"
-        this.width = 2 * 12;
-        this.height = 2 * 20;
-        this.XOffset = this.width / 2;
-        this.YOffset = this.height;
-    }
-}
-
-// Shared sprite for everything
-const sharedMarker = new Marker();
-
 class Measurement {
     constructor(x, y, id) {
-        this.Sprite = sharedMarker;
         this.norm_x = x;
         this.norm_y = y;
         this.id = id;
+        this.radius_px = 10;
     }
 }
 
 function drawOneMeasurement(measurement) {
     // Draw measurement
-    const sprite = measurement.Sprite;
     const normalizer = Math.max(image.width, image.height);
-
     const x = (image.width / 2 + measurement.norm_x * normalizer) * currentImageScale;
     const y = (image.height / 2 + measurement.norm_y * normalizer) * currentImageScale;
-    context.drawImage(sprite.img, x - sprite.XOffset, y - sprite.YOffset, sprite.width, sprite.height);
+    const radius_px = measurement.radius_px * currentImageScale;
+    context.beginPath();
+    context.arc(x, y, radius_px, 0, 2 * Math.PI, false);
+    // context.fillStyle = 'red';
+    // context.fill();
+    context.lineWidth = Math.max(1, Math.min(10, radius_px / 10));
+    context.strokeStyle = '#000';
+    context.stroke();
 
     context.font = "20px Arial";
     const markerText = measurement.id;
     const textMeasurements = context.measureText(markerText);
-    context.fillStyle = "#666";
-    context.globalAlpha = 0.7;
-    context.fillRect(x - (textMeasurements.width / 2), y - 15, textMeasurements.width, 20);
-    context.globalAlpha = 1;
-
-    // Draw position above
     context.fillStyle = "#000";
-    context.fillText(markerText, x, y);
+    context.fillText(markerText, x + textMeasurements.width / 2, y);
 }
 
 function drawMeasurements() {
